@@ -7,9 +7,12 @@ G0w = setGw(nw=201,wrange=(-2,2),name="nonInteracting")
 setfromToy!(G0w,:bethe)
 plot(G0w)
 
-Giwn = setGiwn(1024,24,name="nonInteracting",precision=Float64)
+Giwn = setGiwn(2^12,24,name="nonInteracting",precision=Float64)
 setfromToy!(Giwn,:bethe)
 plot(Giwn.wn,imag(Giwn.data))
+
+Gw = setfromPade(Giwn, nw=101,wrange=(-5,5),npoints=512)
+plot(Gw)
 
 Gtau = invFourier(Giwn)
 Giwn = Fourier(Gtau)

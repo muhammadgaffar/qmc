@@ -1,4 +1,5 @@
 using FFTW
+using LinearAlgebra
 
 function integrate1d(x::AbstractVector, y::AbstractVector,method=:simpsonEven)
     HALF = 0.5
@@ -56,4 +57,16 @@ function ft_forward(mfreq,ntime,β,vτ,τmesh,ωmesh)
             end
         end
         return vω
+end
+
+#get pade coefficient
+function pade_coeff(Giwn::GfimFreq)
+    wn = 1im.*Giwn.wn
+    nwn = length(Giwn.wn)
+    coeff = zeros(eltype(Giwn.data),(nwn,nwn))
+    coeff[1,:] = Giwn.data
+    for i in 2:nwn
+        coeff[i,:] = (coeff[i-1,i-1] ./ coeff[i-1,:] .- 1.0) ./ (wn[i-1].-wn)
+    end
+    return diag(coeff)
 end
