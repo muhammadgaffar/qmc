@@ -25,28 +25,35 @@ function integrate1d(x::AbstractVector, y::AbstractVector,method=:simpsonEven)
     end
 end
 
-function matsubaraTail(ntail::Int,Giwn::GfimFreq)
-    if ntail >= length(Giwn.wn)
-        throw("your matsubara frequency is fewer than 64, make it larger!")
-    end
-    Sn = 0
-    Sx = 0
-    Sy = 0
-    Sxx = 0
-    Sxy = 0
+function tail_coeff(n_moment::Int,Giwn::GfimFreq)
+    wn = Giwn.wn
+    gwn = Giwn.data
+    nwn = length(wn)
 
-    for i in length(Giwn.wn)-ntail:length(Giwn.wn)
-        wn = Giwn.wn[i]
+    Sn, Sx, Sy, Sxx, Sxy = (0, 0, 0, 0, 0)
+    for j in nwn-n_moment:nwn
+        ωn = wn[j]
         Sn += 1
-        Sx += 1 / wn^2
-        Sy += imag(Giwn.data[i])*wn
-        Sxx += 1 / wn^4
-        Sxy += imag(Giwn.data[i])/wn
+        Sx += 1/ωn^2
+        Sy += imag(gwn[j])*ωn
+        Sxx += 1/ωn^4
+        Sxy += imag(gwn[j])*ωn/ωn^2
     end
-
-    return (Sx*Sxy-Sxx*Sy)/(Sn*Sxx-Sx^2)
+    return (Sx*Sxy-Sxx*Sy)/(Sn*Sxx - Sx*Sx)
 end
 
-function timeTail(Gtau::GfimTime)
-    time_tail = -0.5 .+ 0.5 .* (Gtau.tau .- Gtau.beta ./ 2) .- 0.25 .* (Gtau.tau.^2 .- Gtau.beta .* Gtau.tau)
+function ft_forward(mfreq,ntime,β,vτ,τmesh,ωmesh)
+        vω = zeros(Complex{Float64},mfreq)
+        for i in 1:mfreq
+            ωn = ωmesh[i]
+            for j in 1:ntime-1
+                fa = vτ[j+1]
+                fb = vτ[j]
+                a = τmesh[j+1]
+                b = τmesh[j]
+                vω[i] += exp(im*a*ωn)*(-fa+fb+im*(a-b)*fa*ωn)/((a-b)*ωn^2)
+                vω[i] += exp(im*b*ωn)*(fa-fb-im*(a-b)*fb*ωn)/((a-b)*ωn^2)
+            end
+        end
+        return vω
 end

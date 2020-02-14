@@ -16,7 +16,7 @@ bool ReadG0(const string& filename, function2D<dcomplex>& G0, const vector<doubl
   int Nd = G0.size_N();
   int Niom = G0.size_Nd();
   if (!Nd || !Niom) {cerr<<"G0 not allocated!"<<endl; return false;}
-  
+
   ifstream inputf(filename.c_str());
   // Computes number of columns in g0 file
   istream input(inputf.rdbuf());
@@ -37,9 +37,9 @@ bool ReadG0(const string& filename, function2D<dcomplex>& G0, const vector<doubl
   clog << filename << ": Number of rows:    "<< n <<endl;
   clog << filename << ": Number of columns: "<< m <<endl;
   if (m<2){cerr<<"Not enough rows in "<<filename<<endl; return false;}
-  
+
   inputf.seekg(0,ios::beg);
-  
+
   function2D<dcomplex> g0s(Nd,n);
   int in=0; double io;
   while (inputf>>io){
@@ -138,13 +138,13 @@ void QMC::SetIsingQuantities(double U, double J, function1D<double>& Ui)
   // is simply   \sum_j \lambda_i*S_i*n_j*f_ij
   //--------------------------------------------------------------------------------
   // Example 3band model:
-  //  ij  |pair(0,1)|        pair state        |  Ui       |f_ji| 0  1  2  3  4  5 
+  //  ij  |pair(0,1)|        pair state        |  Ui       |f_ji| 0  1  2  3  4  5
   //-------------------------------------------------------|-------------------------
   //   0  |  0,1    |up,down;   0   ;   0   >  |  U+J      | 0  | 1 -1
   //   1  |  0,2    |  up   ;  up   ;   0   >  |  U-J      | 1  | 1    -1
   //   2  |  0,3    |  up   ; down  ;   0   >  |  U	   | 2  | 1       -1
   //   3  |  0,4    |  up   ;   0   ;  up   >  |  U-J      | 3  | 1          -1
-  //   4  |  0,5    |  up   ;   0   ; down  >  |  U	   | 4  | 1             -1   
+  //   4  |  0,5    |  up   ;   0   ; down  >  |  U	   | 4  | 1             -1
   //   5  |  1,2    | down  ;  up   ;   0   >  |  U	   | 5  |    1 -1
   //   6  |  1,3    | down  ; down  ;   0   >  |  U-J      | 6  |    1    -1
   //   7  |  1,4    | down  ;   0   ;  up   >  |  U	   | 7  |    1       -1
@@ -204,11 +204,11 @@ void QMC::AcceptMove(int iz, int il, vector<function2D<double> >& g, const funct
       int p = pair[iz][ip];     // member of the pair
       // prefactor b = a/(1+a(1-g_pp))
       double b = a[ip]/(1+a[ip]*(1-g[p](il,il)));
-      
+
       for (int l=0; l<L; l++) // this computes (g-1)_{l,il}
 	x0[l] = g[p](l,il);   // first we set x0[l] = g_{l,il}
       x0[il] -= 1;            // now be sutract delta_{l,il} to get x0[l] = g_{l,il}-delta_{l,il}
-      
+
       x1 = g[p][il];
       // Here we calculate b*(g-1) x g where x is tensor product
       g[p].Add_rank_update(x0,x1,b);// tensor product (g-1)_{l,il} x g_{il,l'}
@@ -224,7 +224,7 @@ void QMC::CleanUpdate(vector<function2D<double> >& g)
   static function2D<double> A(L,L), B(L,L);
   static function1D<double> a(L);
   static function1D<int> ipiv(L);
-  
+
   for (int i=0; i<Nd; i++){
     // a = e^V-1
     for (int l=0; l<L; l++){
@@ -284,7 +284,7 @@ void QMC::SaveMeasurement(const vector<function2D<double> >& g, int binsize)
   for(int i=0; i<g.size(); i++){
     for (int l0=0; l0<g[i].size_N(); l0++){
       for (int l1=0; l1<g[i].size_Nd(); l1++){
-	if (l0>=l1) Gt[i][l0-l1] += -g[i](l0,l1); // antiperiodic boundary conditions and 
+	if (l0>=l1) Gt[i][l0-l1] += -g[i](l0,l1); // antiperiodic boundary conditions and
 	else Gt[i][L+l0-l1] += g[i](l0,l1);       // -isgn convention in QMC community
       }
     }
@@ -305,7 +305,7 @@ void QMC::SaveMeasurement(const vector<function2D<double> >& g, int binsize)
     if (first_time) { clog<<"The bin is completed and number of bins is currently "<<nbins_stored<<" "; first_time=false;}
     else clog<<nbins_stored<<" ";
   }
-  
+
   // Saving double occupancy
   nnt.resize(Nf);
   nnt=0; // double occupancy can be calculated just like average of n*n over ising configurations
@@ -377,12 +377,12 @@ public:
     for (int i=0; i<Nom; i++) om[i] = -om_max + dh*i;
     for (int i=0; i<Ntau; i++) tau[i] = i*dtau;
     for (int i=0; i<Niom; i++) iom[i] = (2*i+1)*M_PI/beta;
-    
+
     L = min(tau.size(),om.size());
     int LWORK = 3*min(om.size(),tau.size())*min(om.size(),tau.size())+max(max(om.size(),tau.size()),4*min(om.size(),tau.size())*min(om.size(),tau.size())+4*min(om.size(),tau.size())) + 10;
     int IWORK = 8*min(om.size(),tau.size());
     work.resize(LWORK);  iwork.resize(IWORK);
-    
+
     for (int i=0; i<tau.size(); i++)
       for (int j=0; j<om.size(); j++)
 	A(i,j)=-exp(-om[j]*tau[i])/(1+exp(-beta*om[j]));
@@ -470,24 +470,24 @@ void SIVEDE::Transform(int m0, const function<double>& Gtau, const function<doub
   double error=0;
   for (int i=0; i<tau.size(); i++) error += Vt(i,0)*dGtau[i];
   for (int i=0; i<om.size(); i++) sumerr += fabs(error*U(0,i)/S[0]);
-    
+
   for (int m=1; m<mMax; m++){
     double mcoeff = 0;
     for (int i=0; i<tau.size(); i++) mcoeff += Vt(i,m)*Gtau[i];
     if (ph_symmetry && m%2==1) mcoeff=0;
     if (incl_more.Q && m>m0) mcoeff *=  exp(-incl_more.fct*(m-m0));
-    
+
     double error=0;
     for (int i=0; i<tau.size(); i++) error += Vt(i,m)*dGtau[i];
     for (int i=0; i<om.size(); i++)  sumerr += fabs(error*U(m,i)/S[m]);
     if (sumerr>1.) mcoeff=0;
-    
+
     for (int i=0; i<tau.size(); i++) Gp[m][i] = Gp[m-1][i] + mcoeff*Vt(i,m);
     for (int i=0; i<om.size(); i++)  Ap[m][i] = Ap[m-1][i] + mcoeff*U(m,i)/S[m];
-    
+
     double norm=0;
     for (int i=0; i<Ap.size_Nd(); i++) norm+= Ap[m][i];
-    
+
     ocoef<<setw(3)<<m<<" "<<setw(12)<<S[m]<<" "<<setw(12)<<mcoeff/S[m]<<" "<<setw(12)<<norm<<" "<<setw(12)<<error<<" "<<setw(12)<<sumerr<<endl;
   }
   Ap *= (1./dh);
@@ -503,12 +503,12 @@ void SIVEDE::Transform(int m0, const function<double>& Gtau, const function<doub
   for (int i=0; i<Ap.size_Nd(); i++) norm += Ap[m0][i]*dh;
   norm -= 0.5*dh*Ap[m0][0] + 0.5*dh*Ap[m0][om.size()-1];
   clog<<"should renormalize by "<<norm<<endl;
-  
+
   double D0=3;
   if (Qrenormalize) renormalize(Ap[m0], om, D0, nf, beta);
   else Ap[m0] *= (1/norm);
-    
-  
+
+
   // Going to imaginary axis!
   for (int j=0; j<iom.size(); j++){
     dcomplex iomc = dcomplex(0,iom[j]);
@@ -597,7 +597,7 @@ int main(int argc, char *argv[], char *env[])
   double incf=-1;
   int niter = 20;
   double mix = 0.5;
-  
+
   int m0=8;
   double real_w_cutof = 5;
   int N_real_w = 500;
@@ -606,7 +606,7 @@ int main(int argc, char *argv[], char *env[])
   bool print_help=false;
   ifstream ftry("g0iom.input");
   if (!ftry) print_help=true;
-  
+
   int i=0;
   while (++i<argc){
     std::string str(argv[i]);
@@ -684,11 +684,11 @@ int main(int argc, char *argv[], char *env[])
   clog.precision(10);
   cout.precision(12);
   if (ph_symmetry) Ed = -0.5*U;
-  
+
   SIVEDE svd(real_w_cutof, N_real_w, Niom, 20, L+1, beta/L, beta); // class for Fourier transformation
-  
+
   QMC qmc(Nd, L, beta/L, U, J, ndirty); // QMC simulation class
-  
+
   int iseed = time(0); // initialization of random number generator
   RanGSL rand(iseed);
   cout<<"iseed="<<iseed<<endl;
@@ -697,22 +697,22 @@ int main(int argc, char *argv[], char *env[])
   function2D<double> G0(Nd,L+1), G(Nd,L);        // input G0(tau) and output G(tau)
   vector<function2D<double> > g(Nd); // g is a function of ising configuration
   for (int i=0; i<g.size(); i++) g[i].resize(L,L);
-  
+
   InclMore incl_more(false, 1.);
   if (incf>0) {incl_more.Q=true; incl_more.fct=incf;}
-      
+
   if (!ReadG0("g0iom.input", G0iom, svd.iome())) {cerr<<"Can not read G0 input file!"<<endl; return 1;}
 
   int nIsingSpins = L*qmc.NumIsingSpins();              // number of all ising spins
-  
+
   // Tries to read starting ising configureation from file. If it does not exist, initializes it randomly and puts nwarmup to nwarm0
   int nwarmup = nwarm0*nIsingSpins;
   if (qmc.GetStartIsingConfiguration("ising.dat", rand)) nwarmup = nwarm1*nIsingSpins;
-  
+
   int measurement = static_cast<int>(ncor*nIsingSpins); // state recorded every "measurement" MC steps
   int nsteps = measurement*nbin*binsize + nwarmup + 1;
   double nsweep = nsteps/nIsingSpins;  // Number of flips that are tried is nsweeps*L
-  
+
   clog<<"Number of all ising spins is "<<nIsingSpins<<endl;
   clog<<"Measurement recorded every "<<measurement<<" steps"<<endl;
   clog<<"One bin contains "<<binsize<<" measurements and requires "<<measurement*binsize<<" steps"<<endl;
@@ -723,19 +723,19 @@ int main(int argc, char *argv[], char *env[])
   function2D<dcomplex> Giom(Nd,svd.iom_size());   // imaginary frequency analog of G(tau)=G(iom)
   function2D<dcomplex> Sigma(Nd,svd.iom_size());  // self-energy energy on imaginary axis
   function1D<double>  nf(Nd);
-  
+
   for (int iter=0; iter<niter; iter++){ // over DMFT iterations if SCC is very simple (Bethe lattice)
 
     for (int i=0; i<Nd; i++) svd.InverseFourier(G0iom[i], G0[i]); // We read G0(iom). We need G0(tau)
     qmc.SetG0(G0);    // We set G0(tau) on discrete mesh. We have to make sure that it is antiperodic function.
-    
+
     qmc.CleanUpdate(g); // We start with clean update
-    
+
     for (long istep=0; istep<nsteps; istep++){
-    
+
       int isweep = istep/nIsingSpins;     // How many times all ising sites were visited on average
       // ising spin which is going ot be flipped
-      int jj = (random_site) ?  static_cast<int>(rand()*L*qmc.NumIsingSpins()) : istep % nIsingSpins; 
+      int jj = (random_site) ?  static_cast<int>(rand()*L*qmc.NumIsingSpins()) : istep % nIsingSpins;
       int l = jj / qmc.NumIsingSpins();  // which time slice
       int z = jj % qmc.NumIsingSpins();  // and which band this ising spin correspond to
 
@@ -763,20 +763,20 @@ int main(int argc, char *argv[], char *env[])
 
     if (SUN){ // averaging over all bands
       for (int l=0; l<=L; l++){
-	double sum=0;
-	for (int i=0; i<Nd; i++) sum += Gtau[i][l];
-	for (int i=0; i<Nd; i++) Gtau[i][l] = sum/Nd;
+				double sum=0;
+				for (int i=0; i<Nd; i++) sum += Gtau[i][l];
+				for (int i=0; i<Nd; i++) Gtau[i][l] = sum/Nd;
       }
     }
     // Fourier transformation can be with SVD decomposition or linear interpolation of G(tau)
     for (int id=0; id<Nd; id++){
       if (svd_inverse_fourier){
-	if (ph_symmetry) nf[id]=0.5;
-	stringstream c1; c1<<"."<<iter<<ends;
-	svd.Transform(m0, Gtau[id], dGtau[id], Giom[id], ph_symmetry, cure, nf[id], c1.str(),incl_more);
+				if (ph_symmetry) nf[id]=0.5;
+				stringstream c1; c1<<"."<<iter<<ends;
+				svd.Transform(m0, Gtau[id], dGtau[id], Giom[id], ph_symmetry, cure, nf[id], c1.str(),incl_more);
       }else
-	svd.LinearFourier(Gtau[id],Giom[id]);
-      
+				svd.LinearFourier(Gtau[id],Giom[id]);
+
       for (int i=0; i<svd.iom_size(); i++) Sigma[id][i] = 1/G0iom[id][i]-1/Giom[id][i];
       double zero = Sigma[id].last().imag()/svd.iome()[svd.iom_size()-1]; // sigma''(infinity) must go to zero
       for (int i=0; i<svd.iom_size(); i++) Sigma[id][i].imag() -= zero*svd.iome()[i];
@@ -792,11 +792,11 @@ int main(int argc, char *argv[], char *env[])
       //      double Ed = -0.5*U; // impurity level : half-filling
       double mu_QMC = -(Ed+(Nd-1)*U/2.);
       for (int id=0; id<Nd; id++){
-	for (int i=0; i<svd.iom_size(); i++){
-	  dcomplex G0old = G0iom[id][i];
-	  dcomplex G0new = 1/(dcomplex(0,svd.iome()[i]) + mu_QMC - t2*Giom[id][i]);
-	  G0iom[id][i] = G0old*(1-mix) + mix*G0new;
-	}
+				for (int i=0; i<svd.iom_size(); i++){
+				  dcomplex G0old = G0iom[id][i];
+				  dcomplex G0new = 1/(dcomplex(0,svd.iome()[i]) + mu_QMC - t2*Giom[id][i]);
+				  G0iom[id][i] = G0old*(1-mix) + mix*G0new;
+				}
       }
       // some debug printing
       stringstream c3; c3<<"Gb_out."<<iter<<ends;
@@ -805,13 +805,13 @@ int main(int argc, char *argv[], char *env[])
       stringstream c4; c4<<"G0_out."<<iter<<ends;
       ofstream out2(c4.str().c_str());
       for (int i=0; i<svd.iom_size(); i++){
-	out2<<setw(25)<<svd.iome()[i]<<" ";
-	for (int id=0; id<Nd; id++) out2<<setw(25)<<G0iom[id][i]<<" ";
-	out2<<endl;
+				out2<<setw(25)<<svd.iome()[i]<<" ";
+				for (int id=0; id<Nd; id++) out2<<setw(25)<<G0iom[id][i]<<" ";
+				out2<<endl;
       }
     } else{ break;}
 
   }
-  
+
   return 0;
 }

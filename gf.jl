@@ -33,7 +33,8 @@ setGw(;nw,wrange,name,precision=Float32) = setGw(nw,wrange,name=name,precision=p
 
 Base.show(io::IO,gf::GfrealFreq{T}) where T = print(io,
 "GfRealFreq{$T} : $(string(gf.name))
-    mesh    : $(length(gf.w))")
+    mesh    : $(length(gf.w))
+    range   : ($(gf.w[1]),$(gf.w[end]))")
 
 ## for Giwn
 function setGiwn(n::Int,beta::T;name::String,precision=Float32) where T <: Number
@@ -45,7 +46,7 @@ setGiwn(;n,wrange,name,beta,precision=Float32) = setGiwn(n,beta,name=name,precis
 
 Base.show(io::IO,gf::GfimFreq{T}) where T = print(io,
 "GfimFreq{$T} : $(string(gf.name))
-    n       : $(length(gf.wn))
+    nwn     : $(length(gf.wn))
     beta    : $(gf.beta)")
 
 ## for Gtau
@@ -58,7 +59,7 @@ setGtau(;nslices,beta,name,precision=Float32) = setGtau(nslices,beta,name=name,p
 
 Base.show(io::IO,gf::GfimTime{T}) where T = print(io,
 "GfimTime{$T} : $(string(gf.name))
-    n       : $(length(gf.tau))
+    L slices: $(length(gf.tau))
     beta    : $(gf.beta)")
 
 
@@ -77,7 +78,7 @@ function setfromToy!(G0::GreenFunction,toy::Symbol)
     wmesh = 501 # i think this is enough for integration purpose
     if toy == :bethe
         wmesh = LinRange(-1.01,1.01,wmesh) #for bethe, the A0w for default t =0.5
-                                        #the band has value in w ∈ [-1,1]
+                                          #the band has value in w ∈ [-1,1]
         A0w = A0bethe.(wmesh)
     else
         @error "Not yet implemented, try :bethe"
@@ -97,64 +98,47 @@ A0bethe(w; t=0.5) = (abs(w) < 2t ? sqrt(4t^2 - w^2) / (2π*t^2) : 0)
 #setfromAw(Aw,iw)
 
 # transform green function to one another
+
 ## transform giwn to gtau
-function invfourierGiwn(gtau::GfimTime,giwn::GfimFreq)
-    # warning if have different beta, set gtau.beta = giwn.beta
-    # and set reset tau
-    if gtau.beta != giwn.beta
-        @warn "you have different β! β is forced to be same as giwn system"
-        gtau.beta = giwn.beta
-        gtau.tau  = LinRange(0,gtau.beta,length(gtau.tau))
-    end
-    tail = matsubaraTail(4,giwn) # retrive tail of matsubara
+function invFourier(Giwn::GfimFreq)
+    # data and parameter
+    beta = Giwn.beta
+    wn   = Giwn.wn
+    nwn  = length(Giwn.wn)
 
-    gdummy = zeros(eltype(giwn.data),2length(giwn.wn))
-    for i in 1:length(giwn.wn)
-        gdummy[2i] = giwn.data[i] - tail ./ (1im*giwn.wn[i])
-    end
+    # tail coeff, N moments = 32 is good enough, maybe.
+    coeff = tail_coeff(128,Giwn)
+    # tail expansion, first order
+    wn_tail = 1.0 ./ (1im.*wn)
+    tau_tail = -0.5
 
-    # fourier transform !
-    fft!(gdummy)
-    gdummy = real(gdummy)*(2/giwn.beta) .- 0.5tail
-    a = real(giwn.data[end])*giwn.wn[end] / π
-    gdummy[1] += a
-    gdummy[end] -= a
+    # i do not know why when we stretch n to 2n do the trick
+    # whatever... it works
+    gwn = zeros(eltype(Giwn.data),2nwn)
+    gwn[2:2:end] = Giwn.data .- coeff * wn_tail
 
-    #spline interpolation! for ntau
-    ntaudummy = floor(Int,length(gdummy)/2)
-    taudummy = LinRange(0,gtau.beta,ntaudummy)
-    spl = Spline1D(taudummy,gdummy[1:ntaudummy])
-    gtau.data = spl.(gtau.tau)
-    return gtau
+    # fourier transform
+    gtau = fft(gwn)
+    # now take value for [0,β] only
+    gtau = gtau[1:nwn] .* (2 ./ beta) .+ coeff * tau_tail
+    # little correction, do not know what is this
+    a = real(gwn[end])*wn[end] / π
+    gtau[1] += a
+    gtau[end] -= a
+
+    # tau
+    tau = LinRange(0,beta,length(gtau))
+    return GfimTime{eltype(Giwn.wn)}(Giwn.name,tau,real(gtau),beta)
 end
 
-## transform gtau to giwn
-function fourierGtau(giwn::GfimFreq,gtau::GfimTime)
-    τ_tail = timeTail(gtau)
-    freq_tail = matsubaraTail(64,giwn)
+function Fourier(Gtau::GfimTime)
+    beta = Gtau.beta
+    tau  = Gtau.tau
+    ntau = length(Gtau.tau)
+    wn = (2*collect(1:ntau) .+ 1) * π / beta
 
-    gdummy = gtau.beta .* ifft((gtau.data-τ_tail) .* exp.(im*π .* gtau.tau ./ gtau.beta)) .+ freq_tail
-
-    #spline interpolation! for nwn
-    wn = (2*collect(1:length(gdummy)) .+ 1) ./ giwn.beta
-    imspl = Spline1D(wn,imag(gdummy))
-    respl = Spline1D(wn,imag(gdummy))
-    giwn.data = respl.(giwn.wn) + 1im*imspl.(giwn.wn)
-    return giwn
+    gwn = -ft_forward(length(wn),ntau,beta,Gtau.data,tau,wn)
+    return GfimFreq{eltype(Gtau.tau)}(Gtau.name,wn,gwn,beta)
 end
 
 ##setfromPade
-x = setGw(nw=201,wrange=(-2,2),name="mada")
-y = setGiwn(1024,16,name="imaginary")
-z = setGtau(64,16;name="imtime")
-setfromToy!(x,:bethe)
-setfromToy!(y,:bethe)
-
-z=invfourierGiwn(z,y);
-y=fourierGtau(y,z)
-
-plot(z.tau,real(z.data))
-plot(y.wn,imag(y.data))
-
-include("util.jl")
-include("plots.jl")
