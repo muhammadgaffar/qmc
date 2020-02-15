@@ -15,12 +15,11 @@ function integrate1d(x::AbstractVector, y::AbstractVector,method=:simpsonEven)
         @fastmath @simd for i in 2 : N
             @inbounds retval += y[i]
         end
-        @inbounds return (x[2] - x[1]) * (retval + HALF*y[1] + HALF*y[end])
+        return (x[2] - x[1]) * (retval + HALF*y[1] + HALF*y[end])
     elseif method == :simpsonEven
-        @assert length(x) == length(y) "x and y vectors must be of the same length!"
         retval = (17*y[1] + 59*y[2] + 43*y[3] + 49*y[4] + 49*y[end-3] + 43*y[end-2] + 59*y[end-1] + 17*y[end]) / 48
-        for i in 5 : length(y) - 1
-            retval += y[i]
+        @fastmath @simd for i in 5 : length(y) - 1
+            @inbounds retval += y[i]
         end
         return (x[2] - x[1]) * retval
     end
@@ -38,7 +37,7 @@ function tail_coeff(n_moment::Int,Giwn::GfimFreq)
         Sx += 1/ωn^2
         Sy += imag(gwn[j])*ωn
         Sxx += 1/ωn^4
-        Sxy += imag(gwn[j])*ωn/ωn^2
+        Sxy += imag(gwn[j])/ωn
     end
     return (Sx*Sxy-Sxx*Sy)/(Sn*Sxx - Sx*Sx)
 end

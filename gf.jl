@@ -1,11 +1,25 @@
 # GREEN FUNCTION MODULES
-
-## CONSTRUCT BASIS OF GREEN FUNCTION ===============================||
-
+using LinearAlgebra
 using BenchmarkTools
 using Dierckx
 
+import Base: +, -, *, /
+import Base: copy, inv
+
+## CONSTRUCT BASIS OF GREEN FUNCTION ===============================||
+
 abstract type GreenFunction end
+abstract type Descriptor end
+
+struct Omega <: Descriptor end
+omega = Omega()
+om    = Omega()
+Base.show(io::IO,D::Omega) = print(io,"ω")
+
+struct iOmega_n <: Descriptor end
+iomega_n = iOmega_n()
+iwn      = iOmega_n()
+Base.show(io::IO,D::iOmega_n) = print(io,"iωₙ")
 
 mutable struct GfrealFreq{T} <: GreenFunction
     name::String
@@ -68,6 +82,127 @@ Base.show(io::IO,gf::GfimTime{T}) where T = print(io,
 
 ## WHAT CAN WE DO WITH GREEN FUNCTION ===============================||
 
+function copy(G::GreenFunction)
+    data = copy(G.data)
+    if typeof(G) <: GfimFreq mesh = copy(G.wn) end
+    if typeof(G) <: GfrealFreq mesh = copy(G.w) end
+    if typeof(G) <: GfimTime mesh = copy(G.tau) end
+
+    if typeof(G) <: GfrealFreq g = typeof(G)("GF",mesh,data) end
+    if typeof(G) <: GfimFreq || typeof(G) <: GfimTime
+        beta = G.beta
+        g = typeof(G)("GF",mesh,data,beta)
+    end
+    return g
+end
+
+function +(G1::GreenFunction,G2::GreenFunction)
+    if typeof(G1) != typeof(G2)
+        throw("you cannot add different type green function")
+    end
+    g = copy(G1)
+    g.data = G1.data .+ G2.data
+    g.name = "GreenFunction"
+    return g
+end
+
+function -(G1::GreenFunction,G2::GreenFunction)
+    if typeof(G1) != typeof(G2)
+        throw("you cannot substract different type green function")
+    end
+    g = copy(G1)
+    g.data = G1.data .- G2.data
+    g.name = "GreenFunction"
+    return g
+end
+
+function *(G1::GreenFunction,G2::GreenFunction)
+    if typeof(G1) != typeof(G2)
+        throw("you cannot multiply different type green function")
+    end
+    g = copy(G1)
+    g.data = G1.data .* G2.data
+    g.name = "GreenFunction"
+    return g
+end
+
+function *(a::Number,G::GreenFunction)
+    g = copy(G)
+    g.data = a .* G.data
+    g.name = "GreenFunction"
+    return g
+end
+*(G::GreenFunction,a::Number) = *(a::Number,G::GreenFunction)
+
+function *(a::AbstractVector,G::GreenFunction)
+    @assert length(a) == length(G.data) "DimensionMisMatch"
+    g = copy(G)
+    g.data = a .* G.data
+    g.name = "GreenFunction"
+    return g
+end
+*(G::GreenFunction,a::AbstractVector) = *(a::AbstractVector,G::GreenFunction)
+
+function /(G1::GreenFunction,G2::GreenFunction)
+    if typeof(G1) != typeof(G2)
+        throw("you cannot multiply different type green function")
+    end
+    g = copy(G1)
+    g.data = G1.data ./ G2.data
+    g.name = "GreenFunction"
+    return g
+end
+
+function /(a::Number,G::GreenFunction)
+    g = copy(G)
+    g.data = a ./ G.data
+    g.name = "GreenFunction"
+    return g
+end
+function /(G::GreenFunction,a::Number)
+    g = copy(G)
+    g.data = G.data ./ a
+    g.name = "GreenFunction"
+    return g
+end
+
+function /(a::AbstractVector,G::GreenFunction)
+    @assert length(a) == length(G.data) "DimensionMisMatch"
+    g = copy(G)
+    g.data = a ./ G.data
+    g.name = "GreenFunction"
+    return g
+end
+function /(G::GreenFunction,a::AbstractVector)
+    @assert length(a) == length(G.data) "DimensionMisMatch"
+    g = copy(G)
+    g.data = G.data ./ a
+    g.name = "GreenFunction"
+    return g
+end
+
+function +(iwn::iOmega_n,G::GfimFreq)
+    G.data = G.data .+ G.wn
+    return G
+end
++(G::GfimFreq,iwn::iOmega_n) = +(iwn::iOmega_n,G::GfimFreq)
+
+function -(iwn::iOmega_n,G::GfimFreq)
+    G.data = G.wn .- G.data
+    return G
+end
+function -(G::GfimFreq,iwn::iOmega_n)
+    G.data = G.data .- G.wn
+    return G
+end
+
+function inv(G::GreenFunction)
+    g = copy(G)
+    g.data = inv.(G.data)
+    g.name = "GreenFunction"
+    return g
+end
+
 ### for non-interacting cases
 function setfromToy!(G0::GreenFunction,toy::Symbol)
     check = typeof(G0) # check green function type
@@ -77,8 +212,7 @@ function setfromToy!(G0::GreenFunction,toy::Symbol)
     # get A0w from toy model
     wmesh = 501 # i think this is enough for integration purpose, maybe.
     if toy == :bethe
-        wmesh = LinRange(-1.01,1.01,wmesh) #for bethe, the A0w for default t =0.5
-                                          #the band has value in w ∈ [-1,1]
+        wmesh = LinRange(-1.01,1.01,wmesh) #for default t =0.5 the band has value in w ∈ [-1,1]
         A0w = A0bethe.(wmesh)
     else
         @error "Not yet implemented, try :bethe" # help me.
@@ -93,7 +227,7 @@ function setfromToy!(G0::GreenFunction,toy::Symbol)
     elseif check <: GfimTime
         for t in 1:length(G0.tau)
             fm = 1.0 ./ (exp.(G0.beta .* wmesh) .+ 1.0 )
-            intg = A0w .* (fm .- 1) .* exp.(-wmesh .* G0.tau[t])
+            intg = A0w .* (fm .- 1.0) .* exp.(-wmesh .* G0.tau[t])
             G0.data[t] = integrate1d(wmesh,intg)
         end
     end
@@ -113,9 +247,9 @@ function invFourier(Giwn::GfimFreq)
     wn   = Giwn.wn
     nwn  = length(Giwn.wn)
 
-    # tail coeff, N moments = 32 is good enough, maybe.
-    coeff = tail_coeff(128,Giwn)
-    # tail expansion, first order
+    # tail coeff, N moments = 16 is good enough, maybe.
+    coeff = 0
+    # high frequency tail, first order
     wn_tail = 1.0 ./ (1im.*wn)
     tau_tail = -0.5
 
@@ -153,10 +287,10 @@ end
 
 ## G(ω) = Analytical Continuation G(iωₙ), using Pade.
 function setfromPade(Giwn::GfimFreq; nw::Int, wrange::T,
-                npoints=nothing, broadening=0.0001) where T <: Tuple{Number,Number}
+                npoints=nothing, broadening=0.05) where T <: Tuple{Number,Number}
     # initialization
     eta = broadening
-    wn  = 1im.*Giwn.wn
+    wn  = -1im.*Giwn.wn
     if npoints == nothing # npoints to sample, if too large, there are numerical error, NAN.
         nwn = length(wn)
     else
@@ -164,7 +298,7 @@ function setfromPade(Giwn::GfimFreq; nw::Int, wrange::T,
     end
     r   = floor(Int,nwn/2)
     w   = LinRange(wrange...,nw)
-    w   = collect(w) .+ 1im.*eta
+    w   = collect(w) .- 1im.*eta
 
     # get pade Coeff
     coeff = pade_coeff(Giwn)
