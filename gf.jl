@@ -71,10 +71,8 @@ Base.show(io::IO,gf::GfimTime{T}) where T = print(io,
 ### for non-interacting cases
 function setfromToy!(G0::GreenFunction,toy::Symbol)
     check = typeof(G0) # check green function type
-    if check <: GfimTime # gtau is not yet implemented for direct toy model, use fourier transformation instead
-        throw("use Fourier(Giwn) to get Gtau instead")
-    end
-    freq = (check <: GfrealFreq ? G0.w .+ 0.01im : 1im*G0.wn) # Frequency type for hilbert transform
+    if (check <: GfrealFreq) freq = G0.w .+ 0.01im end
+    if (check <: GfimFreq) freq = 1im*G0.wn end
 
     # get A0w from toy model
     wmesh = 501 # i think this is enough for integration purpose, maybe.
@@ -87,9 +85,17 @@ function setfromToy!(G0::GreenFunction,toy::Symbol)
     end
 
     # now do hilbert transform.
-    for iw in 1:length(freq)
-        div = (A0w ./ (freq[iw] .- wmesh))
-        G0.data[iw] = integrate1d(wmesh,div)
+    if check <: GfimFreq || check <: GfrealFreq
+        for iw in 1:length(freq)
+            div = (A0w ./ (freq[iw] .- wmesh))
+            G0.data[iw] = integrate1d(wmesh,div)
+        end
+    elseif check <: GfimTime
+        for t in 1:length(G0.tau)
+            fm = 1.0 ./ (exp.(G0.beta .* wmesh) .+ 1.0 )
+            intg = A0w .* (fm .- 1) .* exp.(-wmesh .* G0.tau[t])
+            G0.data[t] = integrate1d(wmesh,intg)
+        end
     end
     return G0
 end

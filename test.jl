@@ -11,6 +11,10 @@ Giwn = setGiwn(2^12,24,name="nonInteracting",precision=Float64)
 setfromToy!(Giwn,:bethe)
 plot(Giwn.wn,imag(Giwn.data))
 
+Gtau = setGtau(256,24,name="nonInteracting")
+setfromToy!(Gtau,:bethe)
+plot(Gtau.tau,real(Gtau.data))
+
 Gw = setfromPade(Giwn, nw=101,wrange=(-5,5),npoints=512)
 plot(Gw)
 
