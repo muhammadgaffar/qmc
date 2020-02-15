@@ -56,15 +56,15 @@ Base.show(io::IO,gf::GfrealFreq{T}) where T = print(io,
 
 ## for Giwn
 function setGiwn(n::Int,beta::T;name::String,precision=Float32) where T <: Number
-    wn = (2*collect(1:n) .+ 1) * π / beta
-    initzeros = zeros(n)
+    wn = (2*collect(-n:n) .+ 1) * π / beta
+    initzeros = zeros(2n+1)
     return GfimFreq{precision}(name,wn,initzeros,beta)
 end
 setGiwn(;n,wrange,name,beta,precision=Float32) = setGiwn(n,beta,name=name,precision=precision)
 
 Base.show(io::IO,gf::GfimFreq{T}) where T = print(io,
 "GfimFreq{$T} : $(string(gf.name))
-    nwn     : $(length(gf.wn))
+    nwn     : $(Int(0.5*(length(gf.wn)-1)))
     beta    : $(gf.beta)")
 
 ## for Gtau
@@ -243,46 +243,31 @@ A0bethe(w; t=0.5) = (abs(w) < 2t ? sqrt(4t^2 - w^2) / (2π*t^2) : 0)
 ## G(τ) = invFourier(G(iωₙ))
 function invFourier(Giwn::GfimFreq)
     # data and parameter
+    nwn  = Int(0.5*(length(Giwn.wn)-1))
     beta = Giwn.beta
-    wn   = Giwn.wn
-    nwn  = length(Giwn.wn)
 
-    # tail coeff, N moments = 16 is good enough, maybe.
-    coeff = 0
-    # high frequency tail, first order
-    wn_tail = 1.0 ./ (1im.*wn)
-    tau_tail = -0.5
+    # tail coeff, ntail = 128 is enough, maybe.
+    coeff = tail_coeff(Giwn.wn[nwn+2:end],Giwn.data[nwn+2:end], 128)
 
-    # i do not know why when we stretch n to 2n do the trick for fft purpose.
-    # whatever... it works
-    gwn = zeros(eltype(Giwn.data),2nwn)
-    gwn[2:2:end] = Giwn.data .- coeff * wn_tail
+    # inverse Fourier, produce 2n+1 data
+    tau,gtau = fwn_to_ftau(Giwn.data,Giwn.wn,beta, coeff)
 
-    # fourier transform
-    gtau = fft(gwn)
-    # now take value for [0,β) only
-    gtau = gtau[1:nwn] .* (2 ./ beta) .+ coeff * tau_tail
-    # little correction, still do not know what is this
-    a = real(gwn[end])*wn[end] / π
-    gtau[1] += a
-    gtau[end] -= a
+    #spline for n data only..
+    spl = Spline1D(tau,real(gtau))
+    tau = LinRange(0,beta,nwn)
+    gtau = spl.(tau)
 
-    # get G(τ)
-    tau = LinRange(0,beta,length(gtau))
-    return GfimTime{eltype(Giwn.wn)}(Giwn.name,tau,real(gtau),beta)
+    return GfimTime{eltype(Giwn.wn)}(Giwn.name,tau,gtau,beta)
 end
 
 ### G(iωₙ) = Fourier(G(τ))
 function Fourier(Gtau::GfimTime)
     # parameter
-    beta = Gtau.beta
-    tau  = Gtau.tau
     ntau = length(Gtau.tau)
-    wn = (2*collect(1:ntau) .+ 1) * π / beta
 
     # get G(iωₙ)
-    gwn = -ft_forward(length(wn),ntau,beta,Gtau.data,tau,wn)
-    return GfimFreq{eltype(Gtau.tau)}(Gtau.name,wn,gwn,beta)
+    wn,gwn = ftau_to_fwn(Gtau.data,Gtau.tau,Gtau.beta)
+    return GfimFreq{eltype(Gtau.tau)}(Gtau.name,wn,gwn,Gtau.beta)
 end
 
 ## G(ω) = Analytical Continuation G(iωₙ), using Pade.
@@ -290,7 +275,7 @@ function setfromPade(Giwn::GfimFreq; nw::Int, wrange::T,
                 npoints=nothing, broadening=0.05) where T <: Tuple{Number,Number}
     # initialization
     eta = broadening
-    wn  = -1im.*Giwn.wn
+    wn  = -1im.*Giwn.wn[-wn]
     if npoints == nothing # npoints to sample, if too large, there are numerical error, NAN.
         nwn = length(wn)
     else

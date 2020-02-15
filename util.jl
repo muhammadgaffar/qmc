@@ -25,45 +25,13 @@ function integrate1d(x::AbstractVector, y::AbstractVector,method=:simpsonEven)
     end
 end
 
-function tail_coeff(n_moment::Int,Giwn::GfimFreq)
-    wn = Giwn.wn
-    gwn = Giwn.data
-    nwn = length(wn)
-
-    Sn, Sx, Sy, Sxx, Sxy = (0, 0, 0, 0, 0)
-    for j in nwn-n_moment:nwn
-        ωn = wn[j]
-        Sn += 1
-        Sx += 1/ωn^2
-        Sy += imag(gwn[j])*ωn
-        Sxx += 1/ωn^4
-        Sxy += imag(gwn[j])/ωn
-    end
-    return (Sx*Sxy-Sxx*Sy)/(Sn*Sxx - Sx*Sx)
-end
-
-function ft_forward(mfreq,ntime,β,vτ,τmesh,ωmesh)
-        vω = zeros(Complex{Float64},mfreq)
-        for i in 1:mfreq
-            ωn = ωmesh[i]
-            for j in 1:ntime-1
-                fa = vτ[j+1]
-                fb = vτ[j]
-                a = τmesh[j+1]
-                b = τmesh[j]
-                vω[i] += exp(im*a*ωn)*(-fa+fb+im*(a-b)*fa*ωn)/((a-b)*ωn^2)
-                vω[i] += exp(im*b*ωn)*(fa-fb-im*(a-b)*fb*ωn)/((a-b)*ωn^2)
-            end
-        end
-        return vω
-end
 
 #get pade coefficient
 function pade_coeff(Giwn::GfimFreq)
     wn = 1im.*Giwn.wn
-    nwn = length(Giwn.wn)
+    nwn = Int((length(Giwn.wn) - 1) / 2)
     coeff = zeros(eltype(Giwn.data),(nwn,nwn))
-    coeff[1,:] = Giwn.data
+    coeff[1,:] = Giwn.data[length(Giwn.data)-nwn:length(Giwn.data)]
     for i in 2:nwn
         coeff[i,:] = (coeff[i-1,i-1] ./ coeff[i-1,:] .- 1.0) ./ (wn[i-1].-wn)
     end
