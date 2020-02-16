@@ -1,3 +1,7 @@
+### flexible functions for function transforms
+### not necessarily for green function object
+### much easier for expand and debugging
+
 using FFTW
 
 function tail_coeff(wn,fwn, ntail)
@@ -31,21 +35,29 @@ function highfreq_tail(wn,tau,beta; coeff=(1.0,0.0,0.0))
 end
 
 function fwn_to_ftau(fwn,wn,beta,tail_coeff)
+    # initialize tau
     tau = LinRange(0,beta,length(wn))
+    # get the tail
     fwn_tail, ftau_tail = highfreq_tail(wn,tau,beta, coeff=tail_coeff)
+    # substract to its tail
     fwn  = fwn - fwn_tail
+    # fft!
     ftau = fft(fwn)
     ftau .*= exp.(-1im .* π .* (1 + length(wn)) .* tau ./ beta) / beta
+    # re add to its tail
     ftau .+= ftau_tail
+    # little correction
     ftau[end] = -(ftau[1]+tail_coeff[1])
     return tau, ftau
 end
 
 function ftau_to_fwn(ftau,tau,beta)
+    #initialize wn and fwn
     n = length(tau)
     wn = (2*collect(-n:n) .+ 1) * π / beta
     fwn = zeros(eltype(ftau),2n+1)
 
+    #standard fourier transform.
     for i in 1:length(fwn)
         for t in 1:n-1
             ft2 = ftau[t+1]; ft1 = ftau[t]

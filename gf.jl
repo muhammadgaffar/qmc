@@ -247,9 +247,9 @@ function invFourier(Giwn::GfimFreq)
     beta = Giwn.beta
 
     # tail coeff, ntail = 128 is enough, maybe.
-    coeff = tail_coeff(Giwn.wn[nwn+2:end],Giwn.data[nwn+2:end], 128)
+    coeff = tail_coeff(Giwn.wn[nwn+1:end],Giwn.data[nwn+1:end], 128)
 
-    # inverse Fourier, produce 2n+1 data
+    # inverse Fourier, produce 2n+1 data (becuase -n:n data)
     tau,gtau = fwn_to_ftau(Giwn.data,Giwn.wn,beta, coeff)
 
     #spline for n data only..
@@ -265,7 +265,7 @@ function Fourier(Gtau::GfimTime)
     # parameter
     ntau = length(Gtau.tau)
 
-    # get G(iωₙ)
+    # get G(iωₙ), not using fft.
     wn,gwn = ftau_to_fwn(Gtau.data,Gtau.tau,Gtau.beta)
     return GfimFreq{eltype(Gtau.tau)}(Gtau.name,wn,gwn,Gtau.beta)
 end
@@ -275,18 +275,18 @@ function setfromPade(Giwn::GfimFreq; nw::Int, wrange::T,
                 npoints=nothing, broadening=0.05) where T <: Tuple{Number,Number}
     # initialization
     eta = broadening
-    wn  = -1im.*Giwn.wn[-wn]
-    if npoints == nothing # npoints to sample, if too large, there are numerical error, NAN.
-        nwn = length(wn)
-    else
-        nwn = npoints
-    end
-    r   = floor(Int,nwn/2)
-    w   = LinRange(wrange...,nw)
-    w   = collect(w) .- 1im.*eta
+    wn  = -1im.*Giwn.wn
+
+    # matsubara points to sample for pade recursion,
+    # if too large, there are numerical error, NAN.
+    nwn = (npoints == nothing ? length(wn) : npoints)
 
     # get pade Coeff
     coeff = pade_coeff(Giwn)
+
+    r   = floor(Int,nwn/2)
+    w   = LinRange(wrange...,nw)
+    w   = collect(w) .- 1im.*eta
 
     # start pade recursion
     an_prev = 0.0
