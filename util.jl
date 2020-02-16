@@ -1,4 +1,3 @@
-using FFTW
 using LinearAlgebra
 
 function integrate1d(x::AbstractVector, y::AbstractVector,method=:simpsonEven)
@@ -23,17 +22,4 @@ function integrate1d(x::AbstractVector, y::AbstractVector,method=:simpsonEven)
         end
         return (x[2] - x[1]) * retval
     end
-end
-
-
-#get pade coefficient
-function pade_coeff(Giwn::GfimFreq)
-    wn = 1im.*Giwn.wn
-    nwn = Int((length(Giwn.wn) - 1) / 2)
-    coeff = zeros(eltype(Giwn.data),(nwn,nwn))
-    coeff[1,:] = Giwn.data[length(Giwn.data)-nwn:length(Giwn.data)]
-    for i in 2:nwn
-        coeff[i,:] = (coeff[i-1,i-1] ./ coeff[i-1,:] .- 1.0) ./ (wn[i-1].-wn)
-    end
-    return diag(coeff)
 end

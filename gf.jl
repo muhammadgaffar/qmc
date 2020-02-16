@@ -272,35 +272,30 @@ end
 
 ## G(ω) = Analytical Continuation G(iωₙ), using Pade.
 function setfromPade(Giwn::GfimFreq; nw::Int, wrange::T,
-                npoints=nothing, broadening=0.05) where T <: Tuple{Number,Number}
+                npoints=nothing, broadening=0.01) where T <: Tuple{Number,Number}
+
+    ## only use non-negative n for pade recursion
+    nwn = Int((length(Giwn.wn) - 1) / 2)
+    wn  = 1im.*Giwn.wn[length(Giwn.data)-nwn+1:end]
+    gwn = Giwn.data[length(Giwn.data)-nwn+1:end]
     # initialization
     eta = broadening
-    wn  = -1im.*Giwn.wn
+    w = LinRange(wrange...,nw) .+ 1im.*eta
+    w = eltype(wn).(w)
 
     # matsubara points to sample for pade recursion,
-    # if too large, there are numerical error, NAN.
-    nwn = (npoints == nothing ? length(wn) : npoints)
-
-    # get pade Coeff
-    coeff = pade_coeff(Giwn)
-
-    r   = floor(Int,nwn/2)
-    w   = LinRange(wrange...,nw)
-    w   = collect(w) .- 1im.*eta
-
-    # start pade recursion
-    an_prev = 0.0
-    an      = coeff[1]
-    bn_prev = 1.0
-    bn      = 1.0
-    for i in 2:r
-        an_next = an .+ (w .- wn[i-1]) .* coeff[i] .* an_prev
-        bn_next = bn .+ (w .- wn[i-1]) .* coeff[i] .* bn_prev
-        an_prev, an = an, an_next
-        bn_prev, bn = bn, bn_next
+    # if too large, or precision too low there are numerical error, NAN.
+    # warn my precision
+    if eltype(Giwn.wn) == Float32
+        @warn "Your precision is Float32, convert to Float64, or BigFloat"
     end
+    npoints = (npoints == nothing ? length(wn) : npoints)
 
-    # get Gw from pade
-    gw = an ./ bn
+    # get pade coeffision
+    coeff = pade_coeff(wn,gwn)
+
+    # pade recursion approximation
+    w, gw = pade_recursion(w, wn,gwn,npoints,coeff)
+
     return GfrealFreq{eltype(Giwn.wn)}(Giwn.name,real(w),gw)
 end
