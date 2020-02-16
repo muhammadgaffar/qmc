@@ -6,6 +6,9 @@ using Dierckx
 import Base: +, -, *, /
 import Base: copy, inv, convert
 
+include("util.jl")
+include("transform.jl")
+
 ## CONSTRUCT BASIS OF GREEN FUNCTION ===============================||
 
 abstract type GreenFunction end
@@ -172,7 +175,7 @@ end
 
 function -(iwn::iOmega_n,G::GfimFreq)
     g = copy(G)
-    g.data = G.mesh .- G.data
+    g.data = 1im.*G.mesh .- G.data
     return g
 end
 -(G::GfimFreq,iwn::iOmega_n) = -(iwn - G)
