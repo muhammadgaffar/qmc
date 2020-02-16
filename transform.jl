@@ -70,7 +70,9 @@ function ftau_to_fwn(ftau,tau,beta)
 end
 
 function pade_coeff(wn,fwn)
+    # allocate array
     coeff = zeros(eltype(fwn),(length(wn),length(wn)))
+    # start calculating coefficient for recursion
     coeff[1,:] = fwn
     one = eltype(wn)(1.0)
     for i in 2:length(wn)
@@ -80,21 +82,16 @@ function pade_coeff(wn,fwn)
 end
 
 function pade_recursion(w, wn,gwn,npoints,coeff)
-    r = floor(Int,npoints/2)
-
     #start recursion
     an_prev = eltype(wn)(0.0)
     an      = coeff[1]
     bn_prev = eltype(wn)(1.0)
     bn      = eltype(wn)(1.0)
-    for i in 2:r
+    for i in 2:npoints
         an_next = an .+ (w .- wn[i-1]) .* coeff[i] .* an_prev
         bn_next = bn .+ (w .- wn[i-1]) .* coeff[i] .* bn_prev
         an_prev, an = an, an_next
         bn_prev, bn = bn, bn_next
     end
     return w, an ./ bn
-end
-
-function fwn_to_fw()
 end
