@@ -93,5 +93,5 @@ function pade_recursion(w, wn,gwn,npoints,coeff)
         an_prev, an = an, an_next
         bn_prev, bn = bn, bn_next
     end
-    return w, an ./ bn
+    return an ./ bn
 end
