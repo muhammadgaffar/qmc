@@ -1,99 +1,105 @@
-# important module
-using Plots
-using LinearAlgebra
-using BenchmarkTools
-using FFTW
-using Test
+function HF_Solve(G0iwn::GfimFreq,params::Dict)
+    # check parameters, and initialization
+    U,J,L,beta,file = checkParams(params)
+    if (beta == -1) beta = π / Giwn.mesh[1] end # if beta is not set in parameter
+    Ui,pair,fs = getisingParams(U,J,size(Giwn.data,1))
 
-## parameter
-beta=16.0;
-U=2;
-Ed=1;
-J=0;
-Nd=2;
-L=64;
-ncor=3.0;
-binsize=1000;
-nbin=50;
-ndirty=100;
-nwarm0=100;
-nwarm1=10;
-random_site=true;
-Metropolis=true;
-Bethe=true;
-ph_symmetry=true;
-cure=true;
-incf=-1;
-niter=20;
-mix=0.5;
-m0=8;
-real_w_cutof=5;
-N_real_w=500;
-Niwn=500;
+    # PRINTOUT INTRODUCTION OF PROGRAMS
+    printIntro()
 
-## QMC
-### Return Σ(w)
-function HF_qmc(G0iwn,params)
-    # get G0tau by fourier transform
-    G0tau = invfourier_giwn(G0iwn)
-    # Make matrix L * L of G0tau
-    Glltau = get_glltau(G0tau)
-    # get starting ising configuration
-    S = startIsingConfig(params, from_file=false)
+    # INTIALIZATION
+    ## Fourier transform G0iwn
+    G0tau = invFourier(G0iwn)
+    ## Make LxL matrix out of Gtau
+    ## using spline interpolation for new tau
+    G0tau = get_G0tau(G0tau)
+    ## get random ising quantities over L slices and N orbs
+    ## This quantities in is V in e^{-V}, this is result of hubbard-stranovich
+    Vs = startIsing(U,beta,L)
 
-    ## Start QMC loop
-    for iter in 1:niter
-    end
+    # warming up
 
-    print_result()
+    # monte carlo loop
 
-    # get Observable
+    # fitting
+
+    # measurement
+
+    # print result to HDF5
+
+    # only return interacting giwn and sigma_iwn, rest in hdf5
 end
 
-function readG0tau(G0tau,L)
-    L = length(G0tau)
-    Glltau = zeros(ComplexF64,L,L)
-    for i in 0:L-1, j in 0:L-1
-        ind = i-j
-        if sign(ind) == -1
-            Glltau[i+1,j+1] = -G0tau[ind+L]
-        else
-            Glltau[i+1,j+1] = -G0tau[ind+1]
+function checkParams(params::Dict)
+    U = try params["U"] catch; throw("Input U is missing") end
+    if typeof(U) <: Real 1 else throw("Input U is not a real number") end
+
+    J = try params["J"] catch; throw("Input J is missing") end
+    if typeof(J) <: Real 1 else throw("Input J is not a real number") end
+
+    beta = try params["beta"]
+        catch
+             @warn("Input beta is missing, program will use beta from G0(iωn)")
+             -1
+        end
+    if typeof(beta) <: Int 1 else throw("Input beta is not a real number") end
+
+    L = try params["L_slices"] catch; throw("Input L_slices is missing") end
+    if typeof(L) <: Int 1 else throw("Input L_slices is not an integer") end
+
+    file = try params["filename"] catch; throw("Input filename is missing") end
+    if typeof(file) <: String 1 else throw("Input filename is not a string") end
+
+    return U,J,L,beta,file
+end
+
+function printIntro()
+end
+
+function get_G0tau_LL(Gt::GfimTime)
+    L = length(Gt.mesh)
+    G0tau_LL = zeros(eltype(Gt.data), length(Gt.orbs),length(Gt.orbs), L,L)
+    for iorb in 1:length(Gt.orbs), jorb in 1:length(Gt.orbs)
+        for i in 1:L, j in 1:L
+            G0tau_LL[iorb,jorb,i,j] = (i-j>=0 ? -Gt.data[iorb,jorb,i-j+1] : Gt.data[iorb,jorb,L+i-j])
         end
     end
-    return Glltau
+    return G0tau_LL
 end
 
-function startIsingConfig(nf,L)
-    return rand([-1,1],nf*L)
-end
+function getisingParams(U,J,nb)
+    nf = Int( nb * (nb - 1) / 2 )
+    Ui = zeros(nf)
+    pair = zeros(Int,nf,2)
+    fs = zeros(Int,nb,nf)
 
-function freq_tail(coef, β, τ, wn)
-    coef = coef*1
-    giwn_tail = coef[1] ./ (1im .* wn) .+
-            coef[2] ./ (1im*wn).^2 .+
-            coef[3] ./ (1im*wn).^3
-
-    gtau_tail = coef[1] .* (-0.5) .+
-            coef[2] .* (0.5 * (τ .- 0.5 .* β)) .+
-            coef[3] .* (-0.25 * (τ.^2 .- β*τ))
-
-    return giwn_tail, gtau_tail
-end
-
-function invfourier_gwn(giwn,wn,τ,tail_coef=[true,true,false])
-    β = τ[1] + τ[end]
-    giwn_tail, gtau_tail = freq_tail(tail_coef,β,τ,wn)
-
-    giwn -= giwn_tail
-    # set giwn size same as τ
-    tmp_giwn = copy(giwn)
-    giwn = zeros(ComplexF64,length(τ))
-    for i in 1:length(τ)
-        ind = floor(Int64,(i-1)*(length(wn)-1)/(length(τ)-1))
-        giwn[i] = tmp_giwn[ind+1]
+    ij = 0
+    for i in 1:(nb-1), j in (i+1):nb
+        ij += 1
+        Ui[ij] = U
+        S_i = 2*(i%2)-1; S_j = 2*(j%2)-1
+        if (j==(i+1) && (i%2)==1) Ui[ij] += J
+        elseif (S_i*S_j>0) Ui[ij] -= J end
+        pair[ij,1] = i; pair[ij,2] = j
+        fs[i,ij] = 1; fs[j,ij] =-1
     end
-    gtau = fft(giwn)
+    return Ui,pair,fs
+end
 
-    return tmp_giwn,imag((gtau*2/β)) + gtau_tail
+function startIsing(U, beta, L)
+    Nf = 2*Nband
+    Nf = Int( Nf * (Nf - 1) / 2 )
+
+    λ = zeros(Nf)
+    for i in 1:Nf
+        λ[i] = acosh(exp(0.5*(beta/L)*Ui[i]))
+    end
+
+    vn = zeros(Nf,L)
+    for i in 1:Nf
+        vn[i,:] = 2*rand(Bool,L) - 1
+        vn[i,:] .*= λ[i]
+    end
+
+    return vn
 end
