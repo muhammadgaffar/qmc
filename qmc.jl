@@ -1,32 +1,52 @@
 using LinearAlgebra
 using Dierckx
 const lapack = LinearAlgebra.LAPACK
+const blas   = LinearAlgebra.BLAS
+
+import Dates
 
 include("gf.jl")
 
-function HF_Solve(G0iwn::GfimFreq,params::Dict)
+function HF_Solve(Giwn::GfimFreq,params::Dict)
     # check parameters, and initialization
-    U,J,L,beta,file = checkParams(params)
-    if (beta == -1) beta = π / G0iwn.mesh[1] end # if beta is not set in parameter
-    Ui,pair,fs = getisingParams(U,J,size(G0iwn.data,1))
+    U,J,L,beta,file,niter,ntherm,nsweep,nmeas,ndirty = checkParams(params)
+    if (beta == -1) beta = π / Giwn.mesh[1] end # if beta is not set in parameter
+    Ui,pair,fs = getisingParams(U,J, size(Giwn.data,1))
+    nIsing = length(Ui)
+    nwarmup = ntherm*nIsing
 
     # PRINTOUT INTRODUCTION OF PROGRAMS
-    printIntro()
+    printIntro(U,J,L,beta,niter,ntherm,nsweep,nmeas,ndirty,nIsing)
 
-    # INTIALIZATION
-    ## Fourier transform G0iwn
-    G0tau = invFourier(G0iwn)
-    ## Make LxL matrix out of Gtau
-    ## using spline interpolation for new tau
-    tau, g0tau = get_G0tau(G0tau, L,beta)
     ## get random ising quantities over L slices and N orbs
-    ## This quantities in is V in e^{-V}, this is result of hubbard-stranovich
-    Vs = startIsing(U,beta,L)
-    ## make clean update first, calculate g from A*g = g0
-    g = cleanUpdate(Vs,fs,g0tau)
+    ## This quantitiy is V for use in e^{-V}, this is result of hubbard-stranovich
+    Vs = startIsing(Ui,beta,L)
 
     # monte carlo loop
     ## warming up iteration first, we do not collect measurement in warming up
+    naccept = 0
+    for iter in 1:niter
+        ## Fourier transform Giwn
+        Gtau = invFourier(Giwn)
+        ## Make LxL matrix out of Gtau
+        ## using spline interpolation for new tau
+        tau, g0tau = get_G0tau(Gtau, L,beta)
+        ## make clean update first, calculate g from A*g = g0
+        g = cleanUpdate(Vs,fs,g0tau)
+
+        #start sweep iteration
+        for isweep in 1:(nsweep+ntherm)
+            visited_avg = isweep / (L*nIsing)
+            r_site = floor(Int, rand()*L*nIsing)
+            l = floor(Int, (r_site % L)); if (l == 0) l = 1 end # which time slices
+            z = floor(Int, (r_site / L) ) + 1 #which state
+
+            P,a = detRatio(z,l,g,Vs,pair) # metropolis
+
+            if (P > rand()) acceptMove!(g,Vs,a,fs,pair, naccept,ndirty, z, l) end
+        end
+
+    end
 
     # fitting
 
@@ -35,22 +55,22 @@ function HF_Solve(G0iwn::GfimFreq,params::Dict)
     # print result to HDF5
 
     # only return interacting giwn and sigma_iwn, rest in hdf5
-    return pair,fs
+    return
 end
 
 function checkParams(params::Dict)
-    U = try params["U"] catch; throw("Input U is missing") end
+    U = try float(params["U"]) catch; throw("Input U is missing") end
     if typeof(U) <: Real 1 else throw("Input U is not a real number") end
 
-    J = try params["J"] catch; throw("Input J is missing") end
+    J = try float(params["J"]) catch; throw("Input J is missing") end
     if typeof(J) <: Real 1 else throw("Input J is not a real number") end
 
-    beta = try params["beta"]
+    beta = try float(params["beta"])
         catch
              @warn("Input beta is missing, program will use beta from G0(iωn)")
              -1
         end
-    if typeof(beta) <: Int 1 else throw("Input beta is not a real number") end
+    if typeof(beta) <: Float64 1 else throw("Input beta is not a real number") end
 
     L = try params["L_slices"] catch; throw("Input L_slices is missing") end
     if typeof(L) <: Int 1 else throw("Input L_slices is not an integer") end
@@ -58,15 +78,46 @@ function checkParams(params::Dict)
     file = try params["filename"] catch; throw("Input filename is missing") end
     if typeof(file) <: String 1 else throw("Input filename is not a string") end
 
-    return U,J,L,beta,file
+    niter = try params["niter"] catch; throw("Input niter is missing") end
+    if typeof(niter) <: Int 1 else throw("Input niter is not an integer") end
+
+    ntherm = try params["ntherm"] catch; throw("Input ntherm is missing") end
+    if typeof(ntherm) <: Int 1 else throw("Input ntherm is not an integer") end
+
+    nsweep = try params["nsweep"] catch; throw("Input nsweep is missing") end
+    if typeof(nsweep) <: Int 1 else throw("Input nsweep is not an integer") end
+
+    nmeas = try params["measurement"] catch; throw("Input measurement is missing") end
+    if typeof(nmeas) <: Int 1 else throw("Input measurement is not an integer") end
+
+    ndirty = try params["ndirty"] catch;; throw("Input ndirty is missing") end
+    if typeof(ndirty) <: Int 1 else throw("Input ndirty is not an integer") end
+
+    return U,J,L,beta,file,niter,ntherm,nsweep,nmeas,ndirty
 end
 
-function printIntro()
+function printIntro(U,J,L,beta,niter,ntherm,nsweep,nmeas,ndirty,nIsing)
     println("
     ======================================
     HIRCSH-FYE QUANTUM MONTE CARLO SOLVER
     ======================================
-    by: Muhammad Gaffar
+    Copyright © Muhammad Gaffar, 19.02.2020
+
+    Start Running at = $(Dates.now())
+
+    Physical Parameters:
+    β   (Inverse Temperature)   = $beta eV
+    U   (Coulomb Repulsion  )   = $U eV
+    J   (Hund's Effect      )   = $J eV
+
+    Numerical Parameters:
+    L       (Number of Time slices   ) = $L
+    nIsing  (Number of Ising states  ) = $nIsing
+    niter   (Number of MC iteration  ) = $niter
+    ntherm  (Number of Thermalization) = $ntherm
+    nsweep  (Number of Ising Sweep   ) = $nsweep
+    nmeas   (Number of Measurement   ) = $nmeas
+    ndirty  (Number of Dirity update ) = $ndirty
     ")
 end
 
@@ -180,18 +231,62 @@ function cleanUpdate(vn,fs,gtau)
             A[l1,l1] += 1 + a[l1]
         end
 
-        # now calculate g by solve A*g = g0
+        # now calculate g by solve A*g = g0, using LAPACK
         # in Julia it seems little faster than computing inverse g = A^{-1}g0
         g[i,i,:,:],_,_ = lapack.gesv!(A,real(gtau[i,i,:,:]))
     end
     return g
 end
 
+function detRatio(z,l,g,vn,pair)
+    a    = zeros(2)
+    a[1] = exp(-2*vn[z,l]) - 1
+    a[2] = exp( 2*vn[z,l]) - 1
+    pair_up = pair[z,1]
+    pair_dw = pair[z,2]
+    Det_up = 1 + (1 - g[pair_up,pair_up,l,l]) * a[1]
+    Det_dw = 1 + (1 - g[pair_dw,pair_dw,l,l]) * a[2]
+    return Det_up * Det_dw, a
+end
+
+function acceptMove!(g,vn,a,fs,pair, n_accept,ndirty, iz,il)
+    vn[iz,il] *= -1 # flip-at state (z,l)
+
+    x0 = zeros(size(vn,2)) # allocate x0 with size L # for blas.ger!
+    x1 = zeros(size(vn,2)) # allocate x1 with size L # for blas.ger!
+    n_accept += 1
+    if (n_accept % ndirty == 0)
+        g = cleanUpdate(vn,fs,g)
+    else # dirty update
+        for ip in 1:2
+            p = pair[iz,ip]
+            #prefactor
+            b = a[ip] / (1 + a[ip]*(1-g[p,p,il,il]))
+
+            # (g-1)_{l,il}
+            x0 = g[p,p,:,il]
+            x0[il] -= 1
+
+            # g_{l2}
+            x1 = g[p,p,il,:]
+
+            # g[l1,l2] = g[l1,l2] + b * x0 * x1'
+            g[p,p,:,:] = blas.ger!(b, x0,x1,g[p,p,:,:])
+        end
+    end
+end
+
+
 
 p = Dict("U" => 2.0,
          "J" => 0.5,
-         "beta" => 100,
-         "L_slices" => 400,
-         "filename" => "test")
-g0iwn = setGiwn(("sup","sdw","pup","pdw","2","3"),1024,100)
-p,f = HF_Solve(g0iwn,p);
+         "beta" => 16,
+         "L_slices" => 64,
+         "filename" => "test",
+         "niter" => 1,
+         "nsweep" => 10_000,
+         "ntherm" => 20,
+         "measurement" => 200,
+         "ndirty" => 10)
+g0iwn = setGiwn(("sup","sdw"),1024,16)
+g = HF_Solve(g0iwn,p);
