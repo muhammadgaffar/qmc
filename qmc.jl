@@ -8,44 +8,87 @@ import Dates
 include("gf.jl")
 
 function HF_Solve(Giwn::GfimFreq,params::Dict)
-    # check parameters, and initialization
-    U,J,L,beta,file,niter,ntherm,nsweep,nmeas,ndirty = checkParams(params)
+    # PARAMETERS INITIALIZATION
+    U,J,L,beta,file,niter,ntherm,nbins,nsweep,ndirty,binsize = checkParams(params)
     if (beta == -1) beta = π / Giwn.mesh[1] end # if beta is not set in parameter
+    nb = length(Giwn.orbs) # number of orbitals
+    ## get interaction matrix, pair matrix, and spin location
     Ui,pair,fs = getisingParams(U,J, size(Giwn.data,1))
+    ## total of ising state
     nIsing = length(Ui)
-    nwarmup = ntherm*nIsing
+    ## number Monte Carlo steps, warming up first then real step
+    nwarmup = ntherm * nIsing
+    nstep = nsweep * nbins * binsize * nIsing
+
+    # initializes measurement
+    Gtau  = zeros(nb,nb, L) # final Gtau after all Sweep
+    Gtave = zeros(nb,nb, L) # G average over all measurement that are collected in bins
+    occ   = zeros(nb)       # occupancy of each state
+    db_occ = zeros(length(Ui)) # double occupancy
 
     # PRINTOUT INTRODUCTION OF PROGRAMS
-    printIntro(U,J,L,beta,niter,ntherm,nsweep,nmeas,ndirty,nIsing)
+    printIntro(U,J,L,beta,nb,niter, ntherm,nstep+nwarmup,nsweep,ndirty,nIsing,nbins,binsize)
 
     ## get random ising quantities over L slices and N orbs
-    ## This quantitiy is V for use in e^{-V}, this is result of hubbard-stranovich
+    ## This quantitiy is V_{il} = λ_i * s_l, as result of hubbard stranovich
     Vs = startIsing(Ui,beta,L)
 
     # monte carlo loop
     ## warming up iteration first, we do not collect measurement in warming up
-    naccept = 0
     for iter in 1:niter
-        ## Fourier transform Giwn
+        ## Fourier transform Giwn and spline
         Gtau = invFourier(Giwn)
+        Gtau = spline2L(Gtau, L)
+
+        ## (Re)-initialize samplings
+        G_ave = zeros(nb,nb, L)
+        G_sqr = zeros(nb,nb, L)
+        stored = 0
+        nbins_stored = 0
+        naccept = 0
+
         ## Make LxL matrix out of Gtau
         ## using spline interpolation for new tau
-        tau, g0tau = get_G0tau(Gtau, L,beta)
-        ## make clean update first, calculate g from A*g = g0
-        g = cleanUpdate(Vs,fs,g0tau)
+        Gt = get_Gt_mat(Gtau, L,beta)
 
-        #start sweep iteration
-        for isweep in 1:(nsweep+ntherm)
-            visited_avg = isweep / (L*nIsing)
+        ## Clean update first, calculate g from A*g_new = g0
+        g = cleanUpdate(Vs,fs,Gt)
+
+        # print progress
+        printProgress(iter)
+
+        naccept = 0
+        # start sweep iteration
+        for istep in 1:(nstep+nwarmup)
+            visited_avg = istep / (L*nIsing)
+            # choose random site in ising state
             r_site = floor(Int, rand()*L*nIsing)
-            l = floor(Int, (r_site % L)); if (l == 0) l = 1 end # which time slices
+            l = ceil(Int, (r_site % L)); if (l == 0) l = 1 end # which time slices
             z = floor(Int, (r_site / L) ) + 1 #which state
 
-            P,a = detRatio(z,l,g,Vs,pair) # metropolis
+            P,a = detRatio(z,l,g,Vs,pair) # metropolis min[ρ'/ρ,1]
 
-            if (P > rand()) acceptMove!(g,Vs,a,fs,pair, naccept,ndirty, z, l) end
+            #accept Move?
+            if (P > rand())
+                naccept += 1
+                acceptMove!(g,Vs,naccept, a,fs,pair,ndirty,z, l)
+            end
+
+            # collect measurement after nsweep flipping
+            if ((istep - nwarmup) % (nsweep * nIsing)) == 0
+                Gtau, Gtave, G_ave, G_sqr,
+                db_occ, stored, nbins_stored = saveMeasurement(g,Gtau,
+                                nb,length(Ui),L,pair,
+                                Gtave,G_ave,G_sqr,
+                                nbins_stored,stored,binsize,
+                                db_occ)
+            end
         end
+        # get Result
+        Gtau, Gt_deviation, occ, db_occ = getResult(Gtau, G_ave,G_sqr,db_occ, stored,nbins_stored)
 
+        #print result
+        printResult(occ,db_occ,naccept,nstep,nwarmup)
     end
 
     # fitting
@@ -55,7 +98,7 @@ function HF_Solve(Giwn::GfimFreq,params::Dict)
     # print result to HDF5
 
     # only return interacting giwn and sigma_iwn, rest in hdf5
-    return
+    return Gtau
 end
 
 function checkParams(params::Dict)
@@ -84,19 +127,22 @@ function checkParams(params::Dict)
     ntherm = try params["ntherm"] catch; throw("Input ntherm is missing") end
     if typeof(ntherm) <: Int 1 else throw("Input ntherm is not an integer") end
 
-    nsweep = try params["nsweep"] catch; throw("Input nsweep is missing") end
-    if typeof(nsweep) <: Int 1 else throw("Input nsweep is not an integer") end
+    nbins = try params["nbins"] catch; throw("Input nbins is missing") end
+    if typeof(nbins) <: Int 1 else throw("Input nbins is not an integer") end
 
-    nmeas = try params["measurement"] catch; throw("Input measurement is missing") end
-    if typeof(nmeas) <: Int 1 else throw("Input measurement is not an integer") end
+    nsweep = try params["nsweep"] catch; throw("Input nsweep is missing") end
+    if typeof(nsweep) <: Int 1 else throw("Input nweep is not an integer") end
 
     ndirty = try params["ndirty"] catch;; throw("Input ndirty is missing") end
     if typeof(ndirty) <: Int 1 else throw("Input ndirty is not an integer") end
 
-    return U,J,L,beta,file,niter,ntherm,nsweep,nmeas,ndirty
+    binsize = try params["binsize"] catch;; throw("Input binsize is missing") end
+    if typeof(binsize) <: Int 1 else throw("Input binsize is not an integer") end
+
+    return U,J,L,beta,file,niter,ntherm,nbins,nsweep,ndirty,binsize
 end
 
-function printIntro(U,J,L,beta,niter,ntherm,nsweep,nmeas,ndirty,nIsing)
+function printIntro(U,J,L,beta,nb,niter, ntherm,nstep,nsweep,ndirty,nIsing,nbins,binsize)
     println("
     ======================================
     HIRCSH-FYE QUANTUM MONTE CARLO SOLVER
@@ -106,9 +152,10 @@ function printIntro(U,J,L,beta,niter,ntherm,nsweep,nmeas,ndirty,nIsing)
     Start Running at = $(Dates.now())
 
     Physical Parameters:
-    β   (Inverse Temperature)   = $beta eV
-    U   (Coulomb Repulsion  )   = $U eV
-    J   (Hund's Effect      )   = $J eV
+    β   (Inverse Temperature         ) = $beta eV
+    U   (Density-density Interaction ) = $U eV
+    J   (Exchange coupling           ) = $J eV
+    Nb  (Number of Orbital SU(2)     ) = $nb
 
     Numerical Parameters:
     L       (Number of Time slices   ) = $L
@@ -116,28 +163,59 @@ function printIntro(U,J,L,beta,niter,ntherm,nsweep,nmeas,ndirty,nIsing)
     niter   (Number of MC iteration  ) = $niter
     ntherm  (Number of Thermalization) = $ntherm
     nsweep  (Number of Ising Sweep   ) = $nsweep
-    nmeas   (Number of Measurement   ) = $nmeas
-    ndirty  (Number of Dirity update ) = $ndirty
+    nstep   (Total of MC move        ) = $nstep
+    ndirty  (Number of Dirty update  ) = $ndirty
+    nbins   (Bins to collect         ) = $nbins
+    binsize (Grouped measurement     ) = $binsize
     ")
 end
 
-function get_G0tau(Gt::GfimTime, L,beta)
+function printProgress(iter)
+    println("
+    # Iteration #$iter =============================
+    Monte Carlo Sweep Starting...
+    ")
+end
+
+function printResult(occ,db_occ,naccept,nstep,nwarmup)
+    println("
+    Number of Occupation = $occ
+    Double Occupancy     = $db_occ
+    Acceptance Rate      = $(naccept / (nstep + nwarmup))
+
+    Saving measurement to file hdf5.
+    ")
+end
+
+
+function spline2L(Gt::GfimTime, L)
+    beta = Gt.mesh[end]
+    tau = LinRange(0,beta,L)
+    gt = zeros(length(Gt.orbs),length(Gt.orbs), L)
+
+    for iorb in 1:length(Gt.orbs), jorb in 1:length(Gt.orbs)
+        spl = Spline1D(Gt.mesh,real(Gt.data[iorb,jorb,:]))
+        gt[iorb,jorb,:]  = spl.(tau)
+    end
+
+    GfimTime{length(Gt.orbs)}(Gt.orbs,tau,gt)
+end
+
+function get_Gt_mat(Gt::GfimTime, L,beta)
     # this function read input Gtau, and make matrix LxL out of it
     # g0tau = g_{i,j} = Gtau(τi - τj), and its antiperodicity
     # Gtau(τ + β) = -Gtau(τ)
 
     # spline for new L
-    tau = LinRange(0,beta,L)
     g0tau = zeros(length(Gt.orbs),length(Gt.orbs), L,L)
     for iorb in 1:length(Gt.orbs), jorb in 1:length(Gt.orbs)
-        spl = Spline1D(Gt.mesh,real(Gt.data[iorb,jorb,:]))
-        g0  = spl.(tau)
+        g0 = Gt.data[iorb,jorb,:]
         # get G[l1,l2]
         for i in 1:L, j in 1:L
-            g0tau[iorb,jorb,i,j] = (i-j>=0 ? -g0[i-j+1] : g0[L+i-j])
+            g0tau[iorb,jorb,i,j] = (i-j >= 0 ? -g0[i-j+1] : g0[L+i-j+1])
         end
     end
-    return tau,g0tau
+    return g0tau
 end
 
 function getisingParams(U,J,nb)
@@ -197,10 +275,10 @@ end
 function startIsing(Ui, beta, L)
     nf = length(Ui)
     λ = zeros(nf); V = zeros(nf,L)
-    # lambda parameter in trotter decomposition
+    # lambda parameter in hubbard stranovich
     # λ = acosh(e^{-1/2*Δtau*U})
     for i in 1:nf λ[i] = acosh(exp(0.5*(beta/L)*Ui[i])) end
-    # V parameter in trotter decompisition
+    # V parameter in hubbard stranovich
     # V = λs
     for i in 1:nf
         V[i,:] = 2*rand(Bool,L) .- 1
@@ -213,7 +291,7 @@ function cleanUpdate(vn,fs,gtau)
     # calculate interacting green function
 
     # allocation
-    nf = size(vn,1); L  = size(vn,2);  nb = size(gtau,1)
+    nf = size(vn,1); nb = size(gtau,1); L  = size(vn,2);
     A = zeros(L,L); a = zeros(L)
     g = copy(gtau)
 
@@ -231,7 +309,7 @@ function cleanUpdate(vn,fs,gtau)
             A[l1,l1] += 1 + a[l1]
         end
 
-        # now calculate g by solve A*g = g0, using LAPACK
+        # now calculate g_new by solve A*g_new = g_old, using LAPACK linear equation solver
         # in Julia it seems little faster than computing inverse g = A^{-1}g0
         g[i,i,:,:],_,_ = lapack.gesv!(A,real(gtau[i,i,:,:]))
     end
@@ -240,53 +318,116 @@ end
 
 function detRatio(z,l,g,vn,pair)
     a    = zeros(2)
-    a[1] = exp(-2*vn[z,l]) - 1
-    a[2] = exp( 2*vn[z,l]) - 1
-    pair_up = pair[z,1]
-    pair_dw = pair[z,2]
+    # check probability of flipping at (z,l) s_new = -s_old
+    a[1] = exp(-2*vn[z,l]) - 1 # e^{ λ(s_new - s_old)} - 1 = e^{-2λs_old} - 1 = e^{-2V} - 1
+    a[2] = exp( 2*vn[z,l]) - 1 # e^{-λ(s_new - s_old)} - 1 = e^{ 2λs_old} - 1 = e^{ 2V} - 1
+    pair_up = pair[z,1] # spin up orbital posisition
+    pair_dw = pair[z,2] # spin down orbital position
+    # now calculate acceptance probability ρ' / ρ
     Det_up = 1 + (1 - g[pair_up,pair_up,l,l]) * a[1]
     Det_dw = 1 + (1 - g[pair_dw,pair_dw,l,l]) * a[2]
     return Det_up * Det_dw, a
 end
 
-function acceptMove!(g,vn,a,fs,pair, n_accept,ndirty, iz,il)
+function acceptMove!(g,vn,n_accept, a,fs,pair,ndirty,iz,il)
     vn[iz,il] *= -1 # flip-at state (z,l)
 
     x0 = zeros(size(vn,2)) # allocate x0 with size L # for blas.ger!
     x1 = zeros(size(vn,2)) # allocate x1 with size L # for blas.ger!
-    n_accept += 1
     if (n_accept % ndirty == 0)
         g = cleanUpdate(vn,fs,g)
     else # dirty update
         for ip in 1:2
             p = pair[iz,ip]
-            #prefactor
+            #prefactor (scalar)
             b = a[ip] / (1 + a[ip]*(1-g[p,p,il,il]))
 
-            # (g-1)_{l,il}
+            # g_{l,il} - δ_{il} (vector over l1)
             x0 = g[p,p,:,il]
             x0[il] -= 1
 
-            # g_{l2}
+            # g_{il,l} (vector over l2)
             x1 = g[p,p,il,:]
 
-            # g[l1,l2] = g[l1,l2] + b * x0 * x1'
+            # g[l1,l2] = g[l1,l2] + b * x0 * x1' (outer product operation)
             g[p,p,:,:] = blas.ger!(b, x0,x1,g[p,p,:,:])
         end
     end
 end
 
+function saveMeasurement(g,Gtau, nb,nf,L,pair, Gtave,G_ave,G_sqr,
+                        nbins_stored,stored,binsize, db_occ)
+    # save how many measured G in bins already
+    stored += 1
+    # measure new G
+    Gtau.data = zeros(size(Gtau.data)...)
+    for i in 1:nb
+        for l1 in 1:L, l2 in 1:L
+            if (l1>=l2) Gtau.data[i,i,l1-l2+1] += -g[i,i,l1,l2] # antiperodic boundary condition
+            else Gtau.data[i,i,L+l1-l2+1] += g[i,i,l1,l2] end # -sign convention
+        end
+    end
+    Gtau.data .*= (1/L) # normalization because there are L^2 pairs
 
+    # store measured G in bin => Gtave
+    for i in 1:nb, l in 1:L Gtave[i,i,l] += Gtau.data[i,i,l] end
 
-p = Dict("U" => 2.0,
-         "J" => 0.5,
+    # if bin is full, give result by averaging G in bins
+    if (stored % binsize == 0)
+        for i in 1:nb, l in 1:L
+            G_ave[i,i,l] += Gtave[i,i,l] / binsize
+            G_sqr[i,i,l] += G_ave[i,i,l]^2
+        end
+        Gtave .= 0 # go to next bin
+        nbins_stored += 1 # go to next bin
+    end
+
+    # also, store double occupancy
+    # double occupancy is = <n↑*n↓>
+    nnt = zeros(nf)
+    for i in 1:nf, l in 1:L
+        p_up = pair[i,1]
+        p_dw = pair[i,2]
+        nnt[i] += (1-g[p_up,p_up,l,l])*(1-g[p_dw,p_dw,l,l])
+    end
+    nnt *= (1 / L)
+    db_occ += nnt
+
+    return Gtau, Gtave, G_ave, G_sqr, db_occ, stored, nbins_stored
+end
+
+function getResult(Gt, G_ave,G_sqr,db_occ, stored, nbins_stored)
+    # now full average over all measurement in stored bins
+    # get Gt, deviation of Gt, occupation, and double occupancy
+    occ = zeros(size(Gt.data,1))
+    Gt_deviation = zeros(size(Gt.data)...)
+
+    # Gt and deviation of Gt
+    for i in 1:size(Gt.data,1), l in 1:size(Gt.data,3)
+        Gf  = G_ave[i,i,l] / nbins_stored
+        G2f = G_sqr[i,i,l] / nbins_stored
+        Gt_deviation[i,i,l] = sqrt( (G2f - Gf^2) / (nbins_stored-1) )
+        Gt.data[i,i,l] = Gf
+    end
+    # occupation and double occupancy
+    for i in 1:size(Gt.data,1)
+        occ[i] = G_ave[i,i,1] / nbins_stored + 1.0
+    end
+    db_occ = db_occ / stored
+    return Gt, Gt_deviation, occ, db_occ
+end
+
+p = Dict("U" => 0.0,
+         "J" => 0.0,
          "beta" => 16,
-         "L_slices" => 64,
+         "L_slices" => 128,
          "filename" => "test",
          "niter" => 1,
-         "nsweep" => 10_000,
-         "ntherm" => 20,
-         "measurement" => 200,
-         "ndirty" => 10)
-g0iwn = setGiwn(("sup","sdw"),1024,16)
-g = HF_Solve(g0iwn,p);
+         "nsweep" => 3,
+         "ntherm" => 5,
+         "nbins" => 10,
+         "ndirty" => 100,
+         "binsize" => 1000)
+g0iwn = setGiwn((1,2),1024,16)
+setfromToy!(g0iwn,:bethe)
+@time HF_Solve(g0iwn,p);
