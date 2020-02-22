@@ -269,6 +269,27 @@ function invFourier(Giwn::GfimFreq)
     return GfimTime{length(Giwn.orbs)}(Giwn.orbs,tau,gtau)
 end
 
+# another way to do invfourier
+function invFourier!(Giwn::GfimFreq, Gtau::GfimTime)
+    # data and parameter
+    nwn  = Int(0.5*(length(Giwn.mesh)-1))
+    beta = π / Giwn.mesh[nwn+1]
+
+    for iorb in 1:length(Giwn.orbs), jorb in 1:length(Giwn.orbs)
+        # tail coeff, ntail = 128 is enough, maybe.
+        coeff = tail_coeff(Giwn.mesh[nwn+1:end],Giwn.data[iorb,jorb,nwn+1:end], 128)
+
+        # inverse Fourier, produce 2n+1 data (becuase -n:n data)
+        tau_,ftau = fwn_to_ftau(Giwn.data[iorb,jorb,:],Giwn.mesh,beta, coeff)
+
+        #spline for n data only..
+        spl = Spline1D(tau_,real(ftau))
+        Gtau.data[iorb,jorb,:] = spl.(Gtau.mesh)
+    end
+
+    return Gtau
+end
+
 ### G(iωₙ) = Fourier(G(τ))
 function Fourier(Gtau::GfimTime)
     # parameter
@@ -281,10 +302,29 @@ function Fourier(Gtau::GfimTime)
 
     # get G(iωₙ), not using fft.
     for iorb in 1:length(Gtau.orbs), jorb in 1:length(Gtau.orbs)
-        _,giwn[iorb,jorb,:] = ftau_to_fwn(Gtau.data[iorb,jorb,:],Gtau.mesh, beta)
+        _,giwn[iorb,jorb,:] = ftau_to_fwn(Gtau.data[iorb,jorb,:],Gtau.mesh, beta, n)
     end
 
     return GfimFreq{eltype(Gtau.mesh)}(Gtau.orbs,wn,giwn)
+end
+
+# another way to do fourier
+function Fourier!(Gtau::GfimTime, Giwn::GfimFreq)
+    # parameter
+    n = length(Giwn.mesh)
+    beta = Gtau.mesh[end]
+
+    # allocate giwn
+    giwn = zeros(eltype(Gtau.data), length(Gtau.orbs), length(Gtau.orbs), 2n+1)
+    wn = (2*collect(-n:n) .+ 1) * π / beta
+
+    # get G(iωₙ), not using fft.
+    for iorb in 1:length(Gtau.orbs), jorb in 1:length(Gtau.orbs)
+        Giwn.mesh,Giwn.data[iorb,jorb,:] = ftau_to_fwn(Gtau.data[iorb,jorb,:],Gtau.mesh, beta, Int(0.5*(n-1)))
+    end
+
+    Giwn.orbs = Gtau.orbs
+    return Giwn
 end
 
 ## G(ω) = Analytical Continuation G(iωₙ), using Pade.
