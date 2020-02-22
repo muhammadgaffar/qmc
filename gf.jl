@@ -280,7 +280,7 @@ function Fourier(Gtau::GfimTime)
     wn = (2*collect(-n:n) .+ 1) * π / beta
 
     # get G(iωₙ), not using fft.
-    for iorb in 1:length(Giwn.orbs), jorb in 1:length(Giwn.orbs)
+    for iorb in 1:length(Gtau.orbs), jorb in 1:length(Gtau.orbs)
         _,giwn[iorb,jorb,:] = ftau_to_fwn(Gtau.data[iorb,jorb,:],Gtau.mesh, beta)
     end
 
