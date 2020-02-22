@@ -51,11 +51,11 @@ function fwn_to_ftau(fwn,wn,beta,tail_coeff)
     return tau, ftau
 end
 
-function ftau_to_fwn(ftau,tau,beta)
+function ftau_to_fwn(ftau,tau,beta,nwn)
     #initialize wn and fwn
     n = length(tau)
-    wn = (2*collect(-n:n) .+ 1) * π / beta
-    fwn = zeros(eltype(ftau),2n+1)
+    wn = (2*collect(-nwn:nwn) .+ 1) * π / beta
+    fwn = zeros(eltype(ftau),2nwn+1)
 
     #standard fourier transform.
     for i in 1:length(fwn)

@@ -7,15 +7,15 @@ import Dates
 
 include("gf.jl")
 
-function HF_Solve(Giwn::GfimFreq,params::Dict)
+function HF_Solve(G0iwn::GfimFreq,params::Dict)
     # PARAMETERS INITIALIZATION
-    U,J,L,beta,file,niter,ntherm,nbins,nsweep,ndirty,binsize = checkParams(params)
-    if (beta == -1) beta = π / Giwn.mesh[1] end # if beta is not set in parameter
-    nb = length(Giwn.orbs) # number of orbitals
+    U,J,L,beta,file,niter,ntherm,nbins,nsweep,ndirty,binsize,mix = checkParams(params)
+    if (beta == -1) beta = π / G0iwn.mesh[1] end # if beta is not set in parameter
+    nb = length(G0iwn.orbs) # number of orbitals
     ## get interaction matrix, pair matrix, and spin location
-    Ui,pair,fs = getisingParams(U,J, size(Giwn.data,1))
+    Ui,pair,fs = getisingParams(U,J, size(G0iwn.data,1))
     ## total of ising state
-    nIsing = length(Ui)
+    nIsing = length(Ui)*L
     ## number Monte Carlo steps, warming up first then real step
     nwarmup = ntherm * nIsing
     nstep = nsweep * nbins * binsize * nIsing
@@ -25,9 +25,11 @@ function HF_Solve(Giwn::GfimFreq,params::Dict)
     Gtave = zeros(nb,nb, L) # G average over all measurement that are collected in bins
     occ   = zeros(nb)       # occupancy of each state
     db_occ = zeros(length(Ui)) # double occupancy
+    giwn = copy(G0iwn) # for interacting green function in matsubara
+    sig_iwn = copy(G0iwn)
 
     # PRINTOUT INTRODUCTION OF PROGRAMS
-    printIntro(U,J,L,beta,nb,niter, ntherm,nstep+nwarmup,nsweep,ndirty,nIsing,nbins,binsize)
+    printIntro(U,J,L,beta,nb,niter, ntherm,nstep+nwarmup,nsweep,ndirty,nIsing,nbins,binsize,mix)
 
     ## get random ising quantities over L slices and N orbs
     ## This quantitiy is V_{il} = λ_i * s_l, as result of hubbard stranovich
@@ -37,7 +39,7 @@ function HF_Solve(Giwn::GfimFreq,params::Dict)
     ## warming up iteration first, we do not collect measurement in warming up
     for iter in 1:niter
         ## Fourier transform Giwn and spline
-        Gtau = invFourier(Giwn)
+        Gtau = invFourier(G0iwn)
         Gtau = spline2L(Gtau, L)
 
         ## (Re)-initialize samplings
@@ -60,9 +62,9 @@ function HF_Solve(Giwn::GfimFreq,params::Dict)
         naccept = 0
         # start sweep iteration
         for istep in 1:(nstep+nwarmup)
-            visited_avg = istep / (L*nIsing)
+            #visited_avg = istep / (L*nIsing)
             # choose random site in ising state
-            r_site = floor(Int, rand()*L*nIsing)
+            r_site = floor(Int, rand()*nIsing)
             l = ceil(Int, (r_site % L)); if (l == 0) l = 1 end # which time slices
             z = floor(Int, (r_site / L) ) + 1 #which state
 
@@ -89,16 +91,22 @@ function HF_Solve(Giwn::GfimFreq,params::Dict)
 
         #print result
         printResult(occ,db_occ,naccept,nstep,nwarmup)
+
+        # fourier transform to matsubara
+        Fourier!(Gtau,giwn)
+
+        # get Self energy
+        sig_iwn = getSelfEnergy(G0iwn, giwn)
+
+        # self-consistency
+        G0_new = inv(iwn - 0.25*giwn)
+        G0iwn = (1-mix) * G0iwn + mix * G0_new
     end
 
-    # fitting
-
-    # measurement
-
-    # print result to HDF5
+    printEnd()
 
     # only return interacting giwn and sigma_iwn, rest in hdf5
-    return Gtau
+    return inv(inv(G0iwn) - sig_iwn), sig_iwn, Gtau
 end
 
 function checkParams(params::Dict)
@@ -113,7 +121,7 @@ function checkParams(params::Dict)
              @warn("Input beta is missing, program will use beta from G0(iωn)")
              -1
         end
-    if typeof(beta) <: Float64 1 else throw("Input beta is not a real number") end
+    if typeof(beta) <: Real 1 else throw("Input beta is not a real number") end
 
     L = try params["L_slices"] catch; throw("Input L_slices is missing") end
     if typeof(L) <: Int 1 else throw("Input L_slices is not an integer") end
@@ -139,10 +147,13 @@ function checkParams(params::Dict)
     binsize = try params["binsize"] catch;; throw("Input binsize is missing") end
     if typeof(binsize) <: Int 1 else throw("Input binsize is not an integer") end
 
-    return U,J,L,beta,file,niter,ntherm,nbins,nsweep,ndirty,binsize
+    mix = try params["mixing"] catch;; throw("Input mixing is missing") end
+    if typeof(mix) <: Real 1 else throw("Input binsize is not a real number") end
+
+    return U,J,L,beta,file,niter,ntherm,nbins,nsweep,ndirty,binsize,mix
 end
 
-function printIntro(U,J,L,beta,nb,niter, ntherm,nstep,nsweep,ndirty,nIsing,nbins,binsize)
+function printIntro(U,J,L,beta,nb,niter, ntherm,nstep,nsweep,ndirty,nIsing,nbins,binsize,mix)
     println("
     ======================================
     HIRCSH-FYE QUANTUM MONTE CARLO SOLVER
@@ -167,6 +178,7 @@ function printIntro(U,J,L,beta,nb,niter, ntherm,nstep,nsweep,ndirty,nIsing,nbins
     ndirty  (Number of Dirty update  ) = $ndirty
     nbins   (Bins to collect         ) = $nbins
     binsize (Grouped measurement     ) = $binsize
+    mix     (Mixing Parameter        ) = $mix
     ")
 end
 
@@ -184,6 +196,12 @@ function printResult(occ,db_occ,naccept,nstep,nwarmup)
     Acceptance Rate      = $(naccept / (nstep + nwarmup))
 
     Saving measurement to file hdf5.
+    ")
+end
+
+function printEnd()
+    println("
+    End Running at = $(Dates.now())
     ")
 end
 
@@ -274,15 +292,12 @@ end
 
 function startIsing(Ui, beta, L)
     nf = length(Ui)
-    λ = zeros(nf); V = zeros(nf,L)
-    # lambda parameter in hubbard stranovich
-    # λ = acosh(e^{-1/2*Δtau*U})
-    for i in 1:nf λ[i] = acosh(exp(0.5*(beta/L)*Ui[i])) end
-    # V parameter in hubbard stranovich
-    # V = λs
+    V = zeros(nf,L)
+    # parameter in hubbard stranovich
     for i in 1:nf
+        λ = acosh(exp(0.5*(beta/L)*Ui[i]))
         V[i,:] = 2*rand(Bool,L) .- 1
-        V[i,:] .*= λ[i]
+        V[i,:] .*= λ
     end
     return V
 end
@@ -368,6 +383,7 @@ function saveMeasurement(g,Gtau, nb,nf,L,pair, Gtave,G_ave,G_sqr,
         end
     end
     Gtau.data .*= (1/L) # normalization because there are L^2 pairs
+    Gtau.data[:,:,end] = -Gtau.data[:,:,end] .- 1
 
     # store measured G in bin => Gtave
     for i in 1:nb, l in 1:L Gtave[i,i,l] += Gtau.data[i,i,l] end
@@ -417,17 +433,37 @@ function getResult(Gt, G_ave,G_sqr,db_occ, stored, nbins_stored)
     return Gt, Gt_deviation, occ, db_occ
 end
 
-p = Dict("U" => 0.0,
+function getSelfEnergy(G0iwn,Giwn)
+    Sigma = inv(G0iwn) - inv(Giwn)
+
+    # at infinity , sigma must go to zero
+    for iorb in 1:length(G0iwn.orbs), jorb in 1:length(G0iwn.orbs)
+        Sigma.data[iorb,jorb,:] -= 1im*(imag(Sigma.data[iorb,jorb,end]) / Sigma.mesh[end]) .* Sigma.mesh
+    end
+    return Sigma
+end
+
+p = Dict("U" => 0.2,
          "J" => 0.0,
          "beta" => 16,
-         "L_slices" => 128,
+         "L_slices" => 64,
          "filename" => "test",
          "niter" => 1,
-         "nsweep" => 3,
-         "ntherm" => 5,
+         "nsweep" => 2,
+         "ntherm" => 100,
          "nbins" => 10,
          "ndirty" => 100,
-         "binsize" => 1000)
-g0iwn = setGiwn((1,2),1024,16)
-setfromToy!(g0iwn,:bethe)
-@time HF_Solve(g0iwn,p);
+         "binsize" => 1000,
+         "mixing" => 0.5)
+g0iwn = setGiwn((1,2),1024,16);
+setfromToy!(g0iwn,:bethe);
+giwn, sigwn, gt = HF_Solve(g0iwn,p);
+
+
+plot(gt.mesh,real(gt.data[1,1,:]))
+plot(g0iwn.mesh,imag(g0iwn.data[1,1,:]))
+plot(giwn.mesh,imag(giwn.data[1,1,:]))
+xlims!(0,50)
+
+giw = setfromPade(giwn,nw=500,wrange=(-5,5),npoints=200)
+plot(giw.mesh,-imag(giw.data[2,2,:]))
