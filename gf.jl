@@ -1,6 +1,5 @@
 # GREEN FUNCTION MODULES
 using LinearAlgebra
-using BenchmarkTools
 using Dierckx
 
 import Base: +, -, *, /
@@ -353,4 +352,4 @@ function setfromPade(Giwn::GfimFreq; nw::Int, wrange::T,
     end
 
     return GfrealFreq{eltype(Giwn.mesh)}(Giwn.orbs,real(w),gw)
-end
+end;
